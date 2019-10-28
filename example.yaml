@@ -1,0 +1,36 @@
+irrigation:
+  zones:
+    - name: Grass front
+      duration: 10
+      switch_entity: switch.sonoff_1000xxxxxx_1
+    - name: Grass back
+      duration: 10
+      switch_entity: switch.sonoff_1000xxxxxx_2
+    - name: Flowers
+      duration: 10
+      switch_entity: switch.sonoff_1000xxxxxx_3
+    - name: Vegetables
+      duration: 10
+      switch_entity: switch.sonoff_1000xxxxxx_4
+  programs:
+    - name: Morning Grass
+      template: "{{states('sensor.time') == '04:30' and now().strftime('%a') in ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'] }}"
+      zones:
+        - zone: irrigation_zone.grass_front
+          duration: 40
+        - zone: irrigation_zone.grass_back
+          duration: 40
+    - name: Morning Patch
+      template: "{{states('sensor.time') == '06:30' and now().strftime('%a') in ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'] }}"
+      zones:
+        - zone: irrigation_zone.flowers
+          duration: 35
+        - zone: irrigation_zone.vegetables
+          duration: 30
+    - name: Evening Patch
+      template: "{{states('sensor.time') == '19:30' and now().strftime('%a') in ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'] }}"
+      zones:
+        - zone: irrigation_zone.flowers
+          duration: 35
+        - zone: irrigation_zone.vegetables
+          duration: 30
