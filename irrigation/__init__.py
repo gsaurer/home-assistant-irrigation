@@ -394,10 +394,10 @@ class Irrigation(RestoreEntity):
                         break
                 self._running_zone = None
 
-        _LOGGER.warn('Finishing %s', self._name)
         self._stop = True
         self._running = False
         self.async_schedule_update_ha_state(True)
+        _LOGGER.warn('Finishing Program %s', self._name)
 
 
 class IrrigationZone(Entity):
@@ -545,4 +545,5 @@ class IrrigationZone(Entity):
             self._runtime_remaining = 0
             self._state = STATE_OFF
             self.async_schedule_update_ha_state(True)
+            _LOGGER.warn('Finishing Zone %s', self._name)
             return True
