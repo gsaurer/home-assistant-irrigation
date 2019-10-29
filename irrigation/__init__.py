@@ -104,6 +104,22 @@ async def async_setup(hass, config):
     """ END async_run_program_service """
 
     @asyncio.coroutine
+    def async_stop_program_service(call):
+        _LOGGER.info('async_stop_program_service')
+        entity_id = call.data.get(CONST_ENTITY)
+        entity = component.get_entity(entity_id)
+        if entity:
+            target_irrigation = [entity]
+            tasks = [irrigation.async_stop_program()
+                     for irrigation in target_irrigation]
+            if tasks:
+                yield from asyncio.wait(tasks, loop=hass.loop)
+        else:
+            _LOGGER.error('irrigation program not found: %s',
+                          entity_id)
+    """ END async_stop_program_service """
+
+    @asyncio.coroutine
     def async_run_zone_service(call):
         _LOGGER.info('async_run_zone_service')
         entity_id = call.data.get(CONST_ENTITY)
@@ -122,8 +138,24 @@ async def async_setup(hass, config):
     """ END async_run_zone_service """
 
     @asyncio.coroutine
-    def async_stop_program_service(call):
-        _LOGGER.info('async_stop_program_service')
+    def async_stop_zone_service(call):
+        _LOGGER.info('async_stop_zone_service')
+        entity_id = call.data.get(CONST_ENTITY)
+        entity = component.get_entity(entity_id)
+        if entity:
+            target_irrigation = [entity]
+            tasks = [irrigation_zone.async_stop_zone()
+                     for irrigation_zone in target_irrigation]
+            if tasks:
+                yield from asyncio.wait(tasks, loop=hass.loop)
+        else:
+            _LOGGER.error('irrigation_zone not found: %s',
+                          entity_id)
+    """ END async_stop_zone_service """
+
+    @asyncio.coroutine
+    def async_stop_programs_service(call):
+        _LOGGER.info('async_stop_programs_service')
         for program in conf.get(ATTR_PROGRAMS):
             irrigation_id = cv.slugify(program.get(ATTR_IRRIG_ID))
             entity_id = ENTITY_ID_FORMAT.format(irrigation_id)
@@ -131,12 +163,12 @@ async def async_setup(hass, config):
             if entity:
                 target_irrigation = [entity]
                 tasks = [irrigation.async_stop_program()
-                         for irrigation in target_irrigation]
+                        for irrigation in target_irrigation]
                 if tasks:
                     yield from asyncio.wait(tasks, loop=hass.loop)
             else:
                 _LOGGER.error('irrigation program not found: %s',
-                              entity_id)
+                            entity_id)
 
         for zone in conf.get(ATTR_ZONES):
             irrigation_id = cv.slugify(zone.get(ATTR_IRRIG_ID))
@@ -145,13 +177,13 @@ async def async_setup(hass, config):
             if entity:
                 target_irrigation = [entity]
                 tasks = [irrigation_zone.async_stop_zone()
-                         for irrigation_zone in target_irrigation]
+                        for irrigation_zone in target_irrigation]
                 if tasks:
                     yield from asyncio.wait(tasks, loop=hass.loop)
             else:
                 _LOGGER.error('irrigation_zone not found: %s',
-                              entity_id)
-    """ END async_stop_program_service """
+                            entity_id)
+    """ END async_stop_programs_service """
 
     @asyncio.coroutine
     def async_stop_switches(call):
@@ -205,11 +237,17 @@ async def async_setup(hass, config):
                                  'run_program',
                                  async_run_program_service)
     hass.services.async_register(DOMAIN,
+                                 'stop_program',
+                                 async_stop_program_service)
+    hass.services.async_register(DOMAIN,
                                  'run_zone',
                                  async_run_zone_service)
     hass.services.async_register(DOMAIN,
+                                 'stop_zone',
+                                 async_stop_zone_service)
+    hass.services.async_register(DOMAIN,
                                  'stop_programs',
-                                 async_stop_program_service)
+                                 async_stop_programs_service)
 
     return True
 
@@ -322,6 +360,8 @@ class Irrigation(RestoreEntity):
     @asyncio.coroutine
     async def async_update(self):
         _LOGGER.info('async_update - %s', self.entity_id)
+
+        """ assess the template """
         if self._template is not None:
             self._template.hass = self.hass
             try:
@@ -348,20 +388,10 @@ class Irrigation(RestoreEntity):
     async def async_run_program(self, DATA):
         _LOGGER.warn('async_run_program - %s', self.entity_id)
         self._stop = False
-        """ assess the template """
-        if self._template is not None:
-            self._template.hass = self.hass
-            try:
-                trigger_run = self._template.async_render()
 
-                """ if evaluates to true """
-            except:
-                _LOGGER.error('Program template %s, invalid: %s',
-                              self._name,
-                              self._template)
-                return
+        """ don't assess the template - was done before """
 
-        if self._enabled == True and trigger_run == 'True' and self._running == False:
+        if self._enabled == True and self._running == False:
             _LOGGER.warn('Starting Program %s', self._name)
             self._running = True
             self._last_run = dt_util.as_local(
@@ -370,29 +400,32 @@ class Irrigation(RestoreEntity):
 
             """ Iterate through all the defined zones """
             for zone in self._zones:
+                if not self._stop:
+                    zone_id = zone.get(ATTR_ZONE)
+                    duration = int(zone.get(ATTR_DURATION, 0))
 
-                zone_id = zone.get(ATTR_ZONE)
-                duration = int(zone.get(ATTR_DURATION, 0))
+                    DATA = {CONST_ENTITY: zone_id,
+                            ATTR_DURATION: duration}
+                    await self.hass.services.async_call(DOMAIN,
+                                                        'run_zone',
+                                                        DATA)
 
-                DATA = {CONST_ENTITY: zone_id,
-                        ATTR_DURATION: duration}
-                await self.hass.services.async_call(DOMAIN,
-                                                    'run_zone',
-                                                    DATA)
+                    zone = self._component.get_entity(zone_id)
+                    self._running_zone = zone.name
+                    self.async_schedule_update_ha_state(True)
 
-                zone = self._component.get_entity(zone_id)
-                self._running_zone = zone.name
-                self.async_schedule_update_ha_state(True)
-
-                """ wait for the state to take """
-                await asyncio.sleep(1)
-
-                """ monitor the zone state """
-                while zone.state != STATE_OFF:
+                    """ wait for the state to take """
                     await asyncio.sleep(1)
-                    if self._stop == True:
-                        break
-                self._running_zone = None
+
+                    """ monitor the zone state """
+                    while zone.state != STATE_OFF:
+                        await asyncio.sleep(1)
+                        if self._stop == True:
+                            await self.hass.services.async_call(DOMAIN,
+                                                                'stop_zone',
+                                                                DATA)
+                            break
+                    self._running_zone = None
 
         self._stop = True
         self._running = False

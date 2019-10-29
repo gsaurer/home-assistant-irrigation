@@ -1,19 +1,33 @@
 run_program:
-    description: Run a defined irrigation program.
-    fields:
-        entity_id:
-            description: The program to manually run, template evaluation is ignored.
-            example: 'irrigation.morning'
+  description: Run a defined irrigation program.
+  fields:
+    entity_id:
+      description: The program to manually run, template evaluation is ignored.
+      example: "irrigation.morning"
+
+stop_program:
+  description: Stop a defined irrigation program.
+  fields:
+    entity_id:
+      description: The program to manually stop
+      example: "irrigation.morning"
 
 run_zone:
-    description: Run a defined irrigation zone.
-    fields:
-        entity_id:
-            description: The zone to manually run, template evaluation is ignored.
-            example: 'irrigation_zone.vege_patch'
-        duration:
-            description: Otional - Minutes to water.
-            example: 1
-        
+  description: Run a defined irrigation zone.
+  fields:
+    entity_id:
+      description: The zone to manually run, template evaluation is ignored.
+      example: "irrigation_zone.vege_patch"
+    duration:
+      description: Otional - Minutes to water.
+      example: 1
+
+stop_zone:
+  description: Stop a defined irrigation zone.
+  fields:
+    entity_id:
+      description: The zone to manually stop
+      example: "irrigation_zone.vege_patch"
+
 stop_programs:
-    description: Stop any running programs or zones.
+  description: Stop any running programs or zones.
