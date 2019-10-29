@@ -84,18 +84,18 @@ async def async_setup(hass, config):
     @asyncio.coroutine
     def async_run_program_service(call):
         _LOGGER.info('async_run_program_service')
-        entity_id = call.get(CONST_ENTITY)
+        entity_id = call.data.get(CONST_ENTITY)
 
         """ stop any running zones  before starting a new program"""
         hass.services.async_call(DOMAIN,
                                  'stop_programs',
                                  {})
 
+        DATA = {}
         entity = component.get_entity(entity_id)
-
         if entity:
             target_irrigation = [entity]
-            tasks = [irrigation.async_run_program()
+            tasks = [irrigation.async_run_program(DATA)
                      for irrigation in target_irrigation]
             if tasks:
                 yield from asyncio.wait(tasks, loop=hass.loop)
@@ -106,12 +106,10 @@ async def async_setup(hass, config):
     @asyncio.coroutine
     def async_run_zone_service(call):
         _LOGGER.info('async_run_zone_service')
-        """ called from manually service """
         entity_id = call.data.get(CONST_ENTITY)
-        y_duration = call.data.get(ATTR_DURATION, 0)
+        duration = call.data.get(ATTR_DURATION, 0)
 
-        DATA = {ATTR_DURATION: y_duration}
-
+        DATA = {ATTR_DURATION: duration}
         entity = component.get_entity(entity_id)
         if entity:
             target_irrigation = [entity]
@@ -127,8 +125,8 @@ async def async_setup(hass, config):
     def async_stop_program_service(call):
         _LOGGER.info('async_stop_program_service')
         for program in conf.get(ATTR_PROGRAMS):
-            y_irrigation_id = cv.slugify(program.get(ATTR_IRRIG_ID))
-            entity_id = ENTITY_ID_FORMAT.format(y_irrigation_id)
+            irrigation_id = cv.slugify(program.get(ATTR_IRRIG_ID))
+            entity_id = ENTITY_ID_FORMAT.format(irrigation_id)
             entity = component.get_entity(entity_id)
             if entity:
                 target_irrigation = [entity]
@@ -141,8 +139,8 @@ async def async_setup(hass, config):
                               entity_id)
 
         for zone in conf.get(ATTR_ZONES):
-            y_irrigation_id = cv.slugify(zone.get(ATTR_IRRIG_ID))
-            entity_id = ZONE_ENTITY_ID_FORMAT.format(y_irrigation_id)
+            irrigation_id = cv.slugify(zone.get(ATTR_IRRIG_ID))
+            entity_id = ZONE_ENTITY_ID_FORMAT.format(irrigation_id)
             entity = component.get_entity(entity_id)
             if entity:
                 target_irrigation = [entity]
@@ -159,9 +157,8 @@ async def async_setup(hass, config):
     def async_stop_switches(call):
         _LOGGER.info('async_stop_switches')
         for zone in conf.get(ATTR_ZONES):
-            y_irrigation_id = cv.slugify(zone.get(ATTR_IRRIG_ID))
-
-            entity_id = ZONE_ENTITY_ID_FORMAT.format(y_irrigation_id)
+            irrigation_id = cv.slugify(zone.get(ATTR_IRRIG_ID))
+            entity_id = ZONE_ENTITY_ID_FORMAT.format(irrigation_id)
             entity = component.get_entity(entity_id)
             if entity:
                 target_irrigation = [entity]
@@ -180,18 +177,17 @@ async def async_setup(hass, config):
     """ parse progams """
     programentities = []
     for program in conf.get(ATTR_PROGRAMS):
-        irrigation_name = program.get(ATTR_IRRIG_ID);
-        irrigation_id = cv.slugify(irrigation_name)
+        irrigation_id = cv.slugify(program.get(ATTR_IRRIG_ID))
         template = program.get(ATTR_TEMPLATE)
         if template is not None:
             template.hass = hass
             p_entity = ENTITY_ID_FORMAT.format(irrigation_id)
             programentities.append(Irrigation(p_entity,
-                                    program,
-                                    component))
-            _LOGGER.info('Irrigation %s added', irrigation_name)
+                                              program,
+                                              component))
+            _LOGGER.info('Irrigation %s added', irrigation_id)
             if(not program.get(ATTR_ENABLED)):
-                _LOGGER.warn('Irrigation %s disabled', irrigation_name)
+                _LOGGER.warn('Irrigation %s disabled', irrigation_id)
     await component.async_add_entities(programentities)
 
     """ parse zones """
@@ -234,7 +230,8 @@ class Irrigation(RestoreEntity):
                                         DFLT_ICON_PROGRAM_OFF)
         self._stop = False
         """ default to today for new programs """
-        self._last_run = dt_util.as_local(dt_util.now()).strftime(CONST_DATE_TIME_FORMAT)
+        self._last_run = dt_util.as_local(
+            dt_util.now()).strftime(CONST_DATE_TIME_FORMAT)
         self._template = attributes.get(ATTR_TEMPLATE)
         self._enabled = attributes.get(ATTR_ENABLED)
         self._running = False
@@ -322,13 +319,35 @@ class Irrigation(RestoreEntity):
         """
         return self._state_attributes
 
-
-   
     @asyncio.coroutine
     async def async_update(self):
         _LOGGER.info('async_update - %s', self.entity_id)
-        
-        """ hass.async_create_task(async_say_hello(hass, target)) """
+        if self._template is not None:
+            self._template.hass = self.hass
+            try:
+                trigger_run = self._template.async_render()
+                if self._enabled == True and trigger_run == 'True' and self._running == False:
+                    """ if evaluates to true start service """
+                    DATA = {CONST_ENTITY: self.entity_id}
+                    await self.hass.services.async_call(DOMAIN,
+                                                        'run_program',
+                                                        DATA)
+            except:
+                _LOGGER.error('Program template %s, invalid: %s',
+                              self._name,
+                              self._template)
+                return
+
+    @asyncio.coroutine
+    async def async_stop_program(self):
+        _LOGGER.warn('async_stop_program - %s', self.entity_id)
+        self._stop = True
+        self.async_schedule_update_ha_state()
+
+    @asyncio.coroutine
+    async def async_run_program(self, DATA):
+        _LOGGER.warn('async_run_program - %s', self.entity_id)
+        self._stop = False
         """ assess the template """
         if self._template is not None:
             self._template.hass = self.hass
@@ -343,7 +362,7 @@ class Irrigation(RestoreEntity):
                 return
 
         if self._enabled == True and trigger_run == 'True' and self._running == False:
-            _LOGGER.warn('Starting %s', self._name)
+            _LOGGER.warn('Starting Program %s', self._name)
             self._running = True
             self._last_run = dt_util.as_local(
                 dt_util.now()).strftime(CONST_DATE_TIME_FORMAT)
@@ -351,10 +370,10 @@ class Irrigation(RestoreEntity):
 
             """ Iterate through all the defined zones """
             for zone in self._zones:
-  
+
                 zone_id = zone.get(ATTR_ZONE)
                 duration = int(zone.get(ATTR_DURATION, 0))
-                
+
                 DATA = {CONST_ENTITY: zone_id,
                         ATTR_DURATION: duration}
                 await self.hass.services.async_call(DOMAIN,
@@ -375,21 +394,9 @@ class Irrigation(RestoreEntity):
                         break
                 self._running_zone = None
 
-            _LOGGER.warn('Finishing %s', self._name)
-            self._running = False
-            self._stop = True
-            self.async_schedule_update_ha_state(True)
-
-    @asyncio.coroutine
-    async def async_stop_program(self):
-        _LOGGER.warn('async_stop_program - %s', self.entity_id)
+        _LOGGER.warn('Finishing %s', self._name)
         self._stop = True
-        self.async_schedule_update_ha_state()
-
-    @asyncio.coroutine
-    async def async_run_program(self):
-        _LOGGER.warn('async_run_program - %s', self.entity_id)
-        self._stop = False
+        self._running = False
         self.async_schedule_update_ha_state(True)
 
 
@@ -411,7 +418,8 @@ class IrrigationZone(Entity):
         self._stop = False
         self._template = attributes.get(ATTR_TEMPLATE)
         self._runtime_remaining = 0
-        self._state_attributes = {ATTR_DURATION_REMAINING: self._runtime_remaining}
+        self._state_attributes = {
+            ATTR_DURATION_REMAINING: self._runtime_remaining}
 
     async def async_added_to_hass(self):
         await super().async_added_to_hass()
@@ -464,7 +472,7 @@ class IrrigationZone(Entity):
 
     async def async_update(self):
         """Update the state from the template."""
-
+        _LOGGER.info('async_update - %s', self.entity_id)
 
     @asyncio.coroutine
     async def async_stop_zone(self):
@@ -503,8 +511,8 @@ class IrrigationZone(Entity):
                 trigger_run = self._template.async_render()
             except:
                 _LOGGER.error('zone template %s, invalid: %s',
-                                self._name,
-                                self._template)
+                              self._name,
+                              self._template)
                 return
 
         if trigger_run == 'True':
@@ -512,17 +520,18 @@ class IrrigationZone(Entity):
             """ run the watering cycle, water/wait/repeat """
             watering = duration * 60
             self._runtime_remaining = duration
-            
+
             if self._stop == False:
+                _LOGGER.warn('Starting Zone %s', self._name)
                 self._state = STATE_ON
                 self.async_schedule_update_ha_state(True)
                 DATA = {ATTR_ENTITY_ID: self._switch}
                 await self.hass.services.async_call(CONST_SWITCH,
                                                     SERVICE_TURN_ON,
                                                     DATA)
-                
+
                 for second in range(watering):
-                    if second // 60 == 0:
+                    if second / 60 == 0:
                         self._runtime_remaining = self._runtime_remaining - 1
                         self.async_schedule_update_ha_state()
                     await asyncio.sleep(1)
