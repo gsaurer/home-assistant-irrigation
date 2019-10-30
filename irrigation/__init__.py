@@ -284,11 +284,15 @@ class Irrigation(RestoreEntity):
 
         if state:
             """ handle bad data or new entity"""
-            if not cv.date(state.state):
+            try:
+                if not cv.date(state.state):
+                    self._last_run = dt_util.as_local(
+                        date.fromtimestamp(0)).strftime(CONST_DATE_TIME_FORMAT)
+                else:
+                    self._last_run = state.state
+             except:
                 self._last_run = dt_util.as_local(
-                    dt_util.now()).strftime(CONST_DATE_TIME_FORMAT)
-            else:
-                self._last_run = state.state
+                    date.fromtimestamp(0)).strftime(CONST_DATE_TIME_FORMAT)
 
         self.async_schedule_update_ha_state(True)
 
@@ -503,6 +507,7 @@ class IrrigationZone(Entity):
         """
         return self._state_attributes
 
+    @asyncio.coroutine
     async def async_update(self):
         """Update the state from the template."""
         _LOGGER.info('async_update - %s', self.entity_id)
