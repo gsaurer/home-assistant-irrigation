@@ -163,12 +163,12 @@ async def async_setup(hass, config):
             if entity:
                 target_irrigation = [entity]
                 tasks = [irrigation.async_stop_program()
-                        for irrigation in target_irrigation]
+                         for irrigation in target_irrigation]
                 if tasks:
                     yield from asyncio.wait(tasks, loop=hass.loop)
             else:
                 _LOGGER.error('irrigation program not found: %s',
-                            entity_id)
+                              entity_id)
 
         for zone in conf.get(ATTR_ZONES):
             irrigation_id = cv.slugify(zone.get(ATTR_IRRIG_ID))
@@ -177,12 +177,12 @@ async def async_setup(hass, config):
             if entity:
                 target_irrigation = [entity]
                 tasks = [irrigation_zone.async_stop_zone()
-                        for irrigation_zone in target_irrigation]
+                         for irrigation_zone in target_irrigation]
                 if tasks:
                     yield from asyncio.wait(tasks, loop=hass.loop)
             else:
                 _LOGGER.error('irrigation_zone not found: %s',
-                            entity_id)
+                              entity_id)
     """ END async_stop_programs_service """
 
     @asyncio.coroutine
@@ -284,15 +284,11 @@ class Irrigation(RestoreEntity):
 
         if state:
             """ handle bad data or new entity"""
-            try:
-                if not cv.date(state.state):
-                    self._last_run = dt_util.as_local(
-                        date.fromtimestamp(0)).strftime(CONST_DATE_TIME_FORMAT)
-                else:
-                    self._last_run = state.state
-             except:
+            if not state.state:
                 self._last_run = dt_util.as_local(
-                    date.fromtimestamp(0)).strftime(CONST_DATE_TIME_FORMAT)
+                    dt_util.now()).strftime(CONST_DATE_TIME_FORMAT)
+            else:
+                self._last_run = state.state
 
         self.async_schedule_update_ha_state(True)
 
