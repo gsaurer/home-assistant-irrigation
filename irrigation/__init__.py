@@ -3,6 +3,7 @@ import logging
 import voluptuous as vol
 
 from homeassistant.core import callback
+from homeassistant.components.switch import SwitchDevice
 from datetime import (datetime, timedelta)
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.entity import Entity
@@ -252,7 +253,7 @@ async def async_setup(hass, config):
     return True
 
 
-class Irrigation(RestoreEntity):
+class Irrigation(RestoreEntity, SwitchDevice):
     """Representation of an Irrigation program."""
 
     def __init__(self, irrigation_id, attributes, component):
@@ -274,42 +275,14 @@ class Irrigation(RestoreEntity):
         self._enabled = attributes.get(ATTR_ENABLED)
         self._running = False
         self._running_zone = None
-        self._state_attributes = {}
 
     async def async_added_to_hass(self):
-
-        """ Run when entity about to be added."""
         await super().async_added_to_hass()
-        state = await self.async_get_last_state()
 
-        if state:
-            """ handle bad data or new entity"""
-            if not state.state:
-                self._last_run = dt_util.as_local(
-                    dt_util.now()).strftime(CONST_DATE_TIME_FORMAT)
-            else:
-                self._last_run = state.state
-
-        self.async_schedule_update_ha_state(True)
-
-        """Register callbacks. From Template same model as template sensor"""
-        @callback
-        def template_sensor_state_listener(entity, old_state, new_state):
-            """Handle device state changes."""
-            self.async_schedule_update_ha_state(True)
-
-        @callback
-        def template_sensor_startup(event):
-            """Update template on startup."""
-            if self._entities != MATCH_ALL:
-                # Track state change only for valid templates
-                async_track_state_change(
-                    self.hass, self._entities, template_sensor_state_listener)
-
-            self.async_schedule_update_ha_state(True)
-
+        """ house keeping to help ensure solenoids are in a safe state """
         self.hass.bus.async_listen_once(
-            EVENT_HOMEASSISTANT_START, template_sensor_startup)
+            EVENT_HOMEASSISTANT_START, self.async_stop_program())
+        return True
 
     @property
     def should_poll(self):
@@ -319,20 +292,28 @@ class Irrigation(RestoreEntity):
     @property
     def name(self):
         """Return the name of the variable."""
-        if not self._enabled:
-            x = '{}, disabled'.format(
-                self._name)
-        elif self._running:
-            x = '{}, running {}.'.format(
-                self._name, self._running_zone)
-        else:
-            x = '{}, last ran {}'.format(
-                self._name, self._last_run)
-        return x
+        return self._name
 
+    @property
     def is_on(self):
         """If the switch is currently on or off."""
         return self._running
+
+    def turn_on(self, **kwargs):
+        """Turn the device on."""
+        DATA = {CONST_ENTITY: self.entity_id}
+        self.hass.services.async_call(DOMAIN,
+                                      'run_program',
+                                      DATA)
+        self.async_schedule_update_ha_state()
+
+    def turn_off(self, **kwargs):
+        """Turn the device off."""
+        DATA = {CONST_ENTITY: self.entity_id}
+        self.hass.services.async_call(DOMAIN,
+                                      'stop_program',
+                                      DATA)
+        self.async_schedule_update_ha_state()
 
     @property
     def icon(self):
@@ -349,13 +330,6 @@ class Irrigation(RestoreEntity):
             return STATE_ON
         else:
             return STATE_OFF
-
-    @property
-    def state_attributes(self):
-        """Return the state attributes.
-        Implemented by component base class.
-        """
-        return self._state_attributes
 
     @asyncio.coroutine
     async def async_update(self):
@@ -433,7 +407,7 @@ class Irrigation(RestoreEntity):
         _LOGGER.warn('Finishing Program %s', self._name)
 
 
-class IrrigationZone(Entity):
+class IrrigationZone(SwitchDevice):
     """Representation of an Irrigation zone."""
 
     def __init__(self, irrigation_id, attributes):
@@ -451,8 +425,6 @@ class IrrigationZone(Entity):
         self._stop = False
         self._template = attributes.get(ATTR_TEMPLATE)
         self._runtime_remaining = 0
-        self._state_attributes = {
-            ATTR_DURATION_REMAINING: self._runtime_remaining}
 
     async def async_added_to_hass(self):
         await super().async_added_to_hass()
@@ -475,7 +447,7 @@ class IrrigationZone(Entity):
                 self._name, self._runtime_remaining
             )
         else:
-            x = '{} def. duration {} (m).'.format(
+            x = '{} - {} (m).'.format(
                 self._name, self._duration)
         return x
 
@@ -487,26 +459,29 @@ class IrrigationZone(Entity):
         else:
             return self._icon_off
 
+    @property
     def is_on(self):
         """If the switch is currently on or off."""
         return self._state == STATE_ON
+
+    def turn_on(self, **kwargs):
+        """Turn the device on."""
+        DATA = {CONST_ENTITY: self.entity_id}
+        self.hass.services.async_call(DOMAIN,
+                                      'run_zone',
+                                      DATA)
+
+    def turn_off(self, **kwargs):
+        """Turn the device off."""
+        DATA = {CONST_ENTITY: self.entity_id}
+        self.hass.services.async_call(DOMAIN,
+                                      'stop_zone',
+                                      DATA)
 
     @property
     def state(self):
         """Return the state of the component."""
         return self._state
-
-    @property
-    def state_attributes(self):
-        """Return the state attributes.
-        Implemented by component base class.
-        """
-        return self._state_attributes
-
-    @asyncio.coroutine
-    async def async_update(self):
-        """Update the state from the template."""
-        _LOGGER.info('async_update - %s', self.entity_id)
 
     @asyncio.coroutine
     async def async_stop_zone(self):
